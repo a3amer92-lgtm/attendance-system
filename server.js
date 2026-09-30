@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = +process.env.PORT || 3000;
-const HOST = process.env.HOST || '127.0.0.1';      // محلي فقط افتراضيًا (مفيش تسجيل دخول)
+const HOST = process.env.HOST || '0.0.0.0';      // محلي فقط افتراضيًا (مفيش تسجيل دخول)
 const TZ = process.env.TZ_NAME || 'Africa/Cairo';  // التوقيت المعتمد لتسجيل الحضور
 const DB_FILE = path.join(__dirname, 'data', 'db.json');
 const INDEX_FILE = path.join(__dirname, 'public', 'index.html');
