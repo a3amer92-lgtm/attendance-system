@@ -1,0 +1,5 @@
+.git
+node_modules
+data/db.json
+data/db.json.bak
+data/db.employees-backup-*.json

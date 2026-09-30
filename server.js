@@ -5,10 +5,17 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = +process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';      // محلي فقط افتراضيًا (مفيش تسجيل دخول)
+const HOST = process.env.HOST || '127.0.0.1';      // محلي فقط افتراضيًا (مفيش تسجيل دخول)
 const TZ = process.env.TZ_NAME || 'Africa/Cairo';  // التوقيت المعتمد لتسجيل الحضور
-const DB_FILE = path.join(__dirname, 'data', 'db.json');
+const PASSWORD = process.env.ACCESS_PASSWORD || '';  // اختياري: لو موجود، الموقع كله يطلب كلمة سر (Basic Auth)
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // مكان البيانات (على الاستضافة اربطه بقرص دائم)
+const DB_FILE = path.join(DATA_DIR, 'db.json');
+const SEED_FILE = path.join(__dirname, 'data', 'db.seed.json');
 const INDEX_FILE = path.join(__dirname, 'public', 'index.html');
+
+/* أول تشغيل (مثلًا بعد النشر من جيت هاب): لو ملف البيانات مش موجود ننسخه من النسخة الأولية الفاضية */
+fs.mkdirSync(DATA_DIR, { recursive: true });
+if (!fs.existsSync(DB_FILE)) fs.copyFileSync(SEED_FILE, DB_FILE);
 
 const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 const save = () => { const t = DB_FILE + '.tmp'; fs.writeFileSync(t, JSON.stringify(db)); fs.renameSync(t, DB_FILE); };
@@ -150,9 +157,25 @@ function route(req, url, me, body) {
   throw new HttpError(404, 'غير موجود');
 }
 
+const crypto = require('crypto');
+const sha = v => crypto.createHash('sha256').update(String(v)).digest();
+function authorized(req) {
+  if (!PASSWORD) return true;
+  const h = req.headers.authorization || '';
+  if (!h.startsWith('Basic ')) return false;
+  const given = Buffer.from(h.slice(6), 'base64').toString('utf8');
+  const pass = given.slice(given.indexOf(':') + 1);        // اسم المستخدم يتجاهل، كلمة السر فقط
+  return crypto.timingSafeEqual(sha(pass), sha(PASSWORD));
+}
+
 http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname === '/healthz') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok'); }
+    if (!authorized(req)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Attendance", charset="UTF-8"', 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('مطلوب تسجيل الدخول');
+    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -173,4 +196,8 @@ http.createServer(async (req, res) => {
     if (e instanceof HttpError) return send(res, e.code, { error: e.message });
     console.error(e); send(res, 500, { error: 'خطأ داخلي في الخادم' });
   }
-}).listen(PORT, HOST, () => console.log(`الحضور والانصراف يعمل على http://${HOST}:${PORT}  (التوقيت: ${TZ})`));
+}).listen(PORT, HOST, () => {
+  console.log(`الحضور والانصراف يعمل على http://${HOST}:${PORT}  (التوقيت: ${TZ})  البيانات: ${DB_FILE}`);
+  if (!PASSWORD && !['127.0.0.1', 'localhost', '::1'].includes(HOST))
+    console.warn('⚠️ تحذير: الخادم متاح على الشبكة بدون ACCESS_PASSWORD — أي شخص معاه الرابط يقدر يعدّل ويمسح كل البيانات.');
+});
