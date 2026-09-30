@@ -37,14 +37,22 @@ var Auth = {
   login: async function (id, pw) {
     var normId = Utils.normId(id);
     var emp = DB.getEmployee(normId);
-    if (!emp) throw new Error('الرقم الوظيفي أو كلمة السر غير صحيحة');
+    /* لو ما لقيناش بالرقم الوظيفي، نجرّب بالاسم */
+    if (!emp) {
+      var input = String(id || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      var all = DB.getEmployees();
+      var byName = all.filter(function (e) { return e.name.replace(/\s+/g, ' ').toLowerCase() === input; });
+      if (byName.length > 1) throw new Error('يوجد أكثر من موظف بنفس الاسم — استخدم الرقم الوظيفي');
+      emp = byName[0];
+    }
+    if (!emp) throw new Error('الرقم الوظيفي أو الاسم أو كلمة السر غير صحيحة');
 
     /* حسابات قديمة بدون كلمة سر: المبدئية = الرقم الوظيفي */
     if (!emp.pass) {
-      if (pw !== emp.id) throw new Error('الرقم الوظيفي أو كلمة السر غير صحيحة');
+      if (pw !== emp.id) throw new Error('الرقم الوظيفي أو الاسم أو كلمة السر غير صحيحة');
     } else {
       var valid = await Auth.checkPassword(pw, emp.pass);
-      if (!valid) throw new Error('الرقم الوظيفي أو كلمة السر غير صحيحة');
+      if (!valid) throw new Error('الرقم الوظيفي أو الاسم أو كلمة السر غير صحيحة');
     }
 
     sessionStorage.setItem(Auth.SESSION_KEY, JSON.stringify({ userId: emp.id }));

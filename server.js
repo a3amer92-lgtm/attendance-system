@@ -224,10 +224,18 @@ http.createServer(async (req, res) => {
     /* مسارات عامة (من غير تسجيل دخول) */
     if (req.method === 'GET' && p === '/api/setup') return send(res, 200, { count: db.employees.length });
     if (req.method === 'POST' && p === '/api/login') {
-      const id = normId(body.id), key = clientIp(req) + '|' + id;
+      const input = String(body.id || '').trim();
+      const id = normId(input), key = clientIp(req) + '|' + id;
       throttle(key);
-      const emp = db.employees.find(e => e.id === id);
-      if (!emp || typeof body.password !== 'string' || !checkPass(emp, body.password)) { failed(key); throw new HttpError(401, 'الرقم الوظيفي أو كلمة السر غير صحيحة'); }
+      let emp = db.employees.find(e => e.id === id);
+      /* لو ما لقيناش بالرقم الوظيفي، نجرّب بالاسم */
+      if (!emp) {
+        const normName = input.replace(/\s+/g, ' ').toLowerCase();
+        const byName = db.employees.filter(e => e.name.replace(/\s+/g, ' ').toLowerCase() === normName);
+        if (byName.length > 1) { failed(key); throw new HttpError(400, 'يوجد أكثر من موظف بنفس الاسم — استخدم الرقم الوظيفي'); }
+        emp = byName[0];
+      }
+      if (!emp || typeof body.password !== 'string' || !checkPass(emp, body.password)) { failed(key); throw new HttpError(401, 'الرقم الوظيفي أو الاسم أو كلمة السر غير صحيحة'); }
       fails.delete(key);
       return send(res, 200, pub(emp), { 'Set-Cookie': cookieHdr(req, makeToken(emp)) });
     }

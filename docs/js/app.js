@@ -380,7 +380,7 @@ function showLogin() {
     '<h1 id="ttl">' + (first ? '👥 إنشاء أول حساب' : '🕘 الحضور والانصراف') + '</h1>' +
     '<p id="sub" style="color:var(--mut);margin:0 0 16px;font-size:13px">' + (first ? 'مفيش موظفين مسجلين. أنشئ أول حساب لتبدأ.' : 'سجّل الدخول للمتابعة') + '</p>' +
     (first ? '<div><label for="lName" style="display:block;margin:12px 0 4px;font-size:13px;font-weight:600">اسم الموظف</label><input id="lName" maxlength="80" autocomplete="name"></div>' : '') +
-    (first ? '' : '<div><label for="lId" style="display:block;margin:12px 0 4px;font-size:13px;font-weight:600">الرقم الوظيفي</label><input id="lId" placeholder="EMP-001" autocomplete="username" dir="ltr" style="text-align:right"></div>') +
+    (first ? '' : '<div><label for="lId" style="display:block;margin:12px 0 4px;font-size:13px;font-weight:600">الرقم الوظيفي أو اسم الموظف</label><input id="lId" placeholder="EMP-001 أو الاسم" autocomplete="username" dir="rtl"></div>') +
     '<label for="lPw" style="display:block;margin:12px 0 4px;font-size:13px;font-weight:600">كلمة السر</label><input id="lPw" type="password" autocomplete="' + (first ? 'new-password' : 'current-password') + '" dir="ltr" style="text-align:right">' +
     (first ? '<div><label for="lPw2" style="display:block;margin:12px 0 4px;font-size:13px;font-weight:600">تأكيد كلمة السر</label><input id="lPw2" type="password" autocomplete="new-password" dir="ltr" style="text-align:right"></div>' : '') +
     '<button id="lGo" type="submit" style="width:100%;margin-top:18px;padding:11px;border:0;border-radius:10px;background:var(--pr);color:#fff;font:inherit;font-weight:700;cursor:pointer">' + (first ? 'إنشاء الحساب والدخول' : 'دخول') + '</button>' +
