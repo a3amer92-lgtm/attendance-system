@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>تسجيل الدخول — الحضور والانصراف</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f5f9;--card:#fff;--tx:#1b2333;--mut:#667085;--bd:#e3e7ee;--pr:#2456d6;--er:#c22b3a;--ers:#fde7ea}
+@media(prefers-color-scheme:dark){:root{--bg:#0f141d;--card:#182030;--tx:#e8ecf4;--mut:#93a0b8;--bd:#2a3549;--pr:#6c93ff;--er:#ff7a88;--ers:#3d1a20}}
+*{box-sizing:border-box}html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 Cairo,Tahoma,Arial,sans-serif;display:grid;place-items:center;padding:16px}
+.card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:24px}
+h1{margin:0 0 4px;font-size:20px}p{margin:0 0 16px;color:var(--mut);font-size:13px}
+label{display:block;margin:12px 0 4px;font-size:13px;font-weight:600}
+input{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+input:focus{outline:2px solid var(--pr);outline-offset:1px}
+button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:10px;background:var(--pr);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+#err{display:none;margin-top:14px;padding:9px 12px;border-radius:10px;background:var(--ers);color:var(--er);font-size:13px}
+.hint{margin-top:14px;font-size:12px;color:var(--mut)}
+</style></head><body>
+<form class="card" id="f" autocomplete="on">
+  <h1 id="ttl">🕘 الحضور والانصراف</h1><p id="sub">سجّل الدخول للمتابعة</p>
+  <div id="nameBox" hidden><label for="name">اسم الموظف</label><input id="name" maxlength="80" autocomplete="name"></div>
+  <div id="idBox"><label for="id">الرقم الوظيفي</label><input id="id" placeholder="EMP-001" autocomplete="username" dir="ltr" style="text-align:right"></div>
+  <label for="pw">كلمة السر</label><input id="pw" type="password" autocomplete="current-password" dir="ltr" style="text-align:right">
+  <div id="pw2Box" hidden><label for="pw2">تأكيد كلمة السر</label><input id="pw2" type="password" autocomplete="new-password" dir="ltr" style="text-align:right"></div>
+  <button id="go" type="submit">دخول</button>
+  <div id="err" role="alert"></div>
+  <div class="hint" id="hint">حساب قديم ولسه معملتش كلمة سر؟ كلمة السر المبدئية هي رقمك الوظيفي — غيّرها بعد الدخول من الإعدادات.</div>
+</form>
+<script>
+const $=id=>document.getElementById(id);let first=false;
+function err(m){const e=$('err');e.textContent=m;e.style.display=m?'block':'none'}
+fetch('/api/setup').then(r=>r.json()).then(j=>{if(j.count===0){first=true;
+  $('ttl').textContent='👥 إنشاء أول حساب';$('sub').textContent='مفيش موظفين مسجلين. أنشئ أول حساب لتبدأ.';
+  $('nameBox').hidden=$('pw2Box').hidden=false;$('idBox').hidden=true;$('hint').hidden=true;
+  $('go').textContent='إنشاء الحساب والدخول';$('pw').autocomplete='new-password'}}).catch(()=>{});
+$('f').onsubmit=async ev=>{ev.preventDefault();err('');
+  const pw=$('pw').value;
+  if(first&&pw!==$('pw2').value)return err('كلمتا السر غير متطابقتين');
+  $('go').disabled=true;
+  try{
+    const r=await fetch(first?'/api/first-setup':'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(first?{name:$('name').value,password:pw}:{id:$('id').value,password:pw})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(j.error||'تعذّر الاتصال بالخادم');
+    location.replace('/');
+  }catch(e){err(e.message);$('go').disabled=false}};
+</script></body></html>

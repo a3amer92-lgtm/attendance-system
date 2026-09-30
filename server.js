@@ -3,15 +3,16 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = +process.env.PORT || 3000;
 const HOST = process.env.HOST || '127.0.0.1';      // محلي فقط افتراضيًا (مفيش تسجيل دخول)
 const TZ = process.env.TZ_NAME || 'Africa/Cairo';  // التوقيت المعتمد لتسجيل الحضور
-const PASSWORD = process.env.ACCESS_PASSWORD || '';  // اختياري: لو موجود، الموقع كله يطلب كلمة سر (Basic Auth)
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');   // مكان البيانات (على الاستضافة اربطه بقرص دائم)
 const DB_FILE = path.join(DATA_DIR, 'db.json');
 const SEED_FILE = path.join(__dirname, 'data', 'db.seed.json');
 const INDEX_FILE = path.join(__dirname, 'public', 'index.html');
+const LOGIN_FILE = path.join(__dirname, 'public', 'login.html');
 
 /* أول تشغيل (مثلًا بعد النشر من جيت هاب): لو ملف البيانات مش موجود ننسخه من النسخة الأولية الفاضية */
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -19,6 +20,39 @@ if (!fs.existsSync(DB_FILE)) fs.copyFileSync(SEED_FILE, DB_FILE);
 
 const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 const save = () => { const t = DB_FILE + '.tmp'; fs.writeFileSync(t, JSON.stringify(db)); fs.renameSync(t, DB_FILE); };
+
+/* ===== المصادقة: كلمات سر مشفرة (scrypt) + جلسة موقّعة في كوكي HttpOnly ===== */
+const MIN_PASS = 6, SESSION_MS = 30 * 24 * 3600e3;
+if (!db.secret) { db.secret = crypto.randomBytes(32).toString('hex'); save(); }
+const pub = ({ id, name, dept, job, role }) => ({ id, name, dept, job, role });
+const hashPass = (pw, salt = crypto.randomBytes(16).toString('hex')) => `${salt}:${crypto.scryptSync(pw, salt, 32).toString('hex')}`;
+function checkPass(emp, pw) {
+  if (!emp.pass) return pw === emp.id;   // حساب قديم لسه معملوش كلمة سر: المبدئية = الرقم الوظيفي
+  const [salt, h] = emp.pass.split(':'), a = Buffer.from(h, 'hex'), b = crypto.scryptSync(pw, salt, 32);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function setPass(emp, pw) {
+  if (typeof pw !== 'string' || pw.length < MIN_PASS) throw new HttpError(400, `كلمة السر لازم تكون ${MIN_PASS} أحرف على الأقل`);
+  if (pw.length > 100) throw new HttpError(400, 'كلمة السر طويلة جدًا');
+  emp.pass = hashPass(pw); emp.pwv = (emp.pwv || 0) + 1; save();   // تغيير pwv بيبطّل الجلسات القديمة
+}
+const sign = v => crypto.createHmac('sha256', db.secret).update(v).digest('base64url');
+const makeToken = e => { const v = `${e.id}.${Date.now() + SESSION_MS}.${e.pwv || 0}`; return `${v}.${sign(v)}`; };
+function sessionUser(req) {
+  const m = /(?:^|;\s*)sid=([^;]+)/.exec(req.headers.cookie || ''); if (!m) return null;
+  const t = decodeURIComponent(m[1]).split('.'); if (t.length !== 4) return null;
+  const v = t.slice(0, 3).join('.'), want = Buffer.from(sign(v)), got = Buffer.from(t[3]);
+  if (want.length !== got.length || !crypto.timingSafeEqual(want, got) || +t[1] < Date.now()) return null;
+  const e = db.employees.find(x => x.id === t[0]);
+  return e && (e.pwv || 0) === +t[2] ? e : null;
+}
+const cookieHdr = (req, tok, maxAge = SESSION_MS / 1000) =>
+  `sid=${tok}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}` + (req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '');
+const fails = new Map();   // حماية من تخمين كلمة السر: 5 محاولات فاشلة = قفل دقيقة
+const clientIp = req => (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+function throttle(k) { const f = fails.get(k); if (f && Date.now() >= f.until) fails.delete(k); else if (f && f.n >= 5) throw new HttpError(429, 'محاولات كتيرة — جرّب بعد دقيقة'); }
+function failed(k) { const f = fails.get(k) || { n: 0 }; f.n++; f.until = Date.now() + 60000; fails.set(k, f); }
+const normId = v => { v = String(v || '').trim().toUpperCase(); return /^\d+$/.test(v) ? 'EMP-' + v.padStart(3, '0') : v; };
 
 /* الوقت الحالي بتوقيت الشركة (وقت الخادم هو المرجع، مش وقت جهاز الموظف) */
 function nowLocal() {
@@ -38,8 +72,8 @@ const workDaysOf = id => (normShift(db.shifts[id]) || { days: DEFAULT_DAYS }).da
 const isOffDay = (n, id) => !workDaysOf(id).includes(n.dow) || db.holidays.includes(n.date); // خارج أيام عمل الموظف + العطلات
 
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
-const send = (res, code, obj) => {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+const send = (res, code, obj, extra = {}) => {
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...extra });
   res.end(JSON.stringify(obj));
 };
 const readBody = req => new Promise((ok, no) => {
@@ -51,7 +85,7 @@ function route(req, url, me, body) {
   const { pathname: p, searchParams: q } = url;
 
   if (req.method === 'GET' && p === '/api/bootstrap')
-    return { employees: [me], shifts: { [me.id]: normShift(db.shifts[me.id]) }, holidays: db.holidays };
+    return { employees: [pub(me)], shifts: { [me.id]: normShift(db.shifts[me.id]) }, holidays: db.holidays };
 
   /* الإعدادات: عرض شيفتات كل الموظفين (متاح لكل المستخدمين) */
   if (req.method === 'GET' && p === '/api/settings/shifts') {
@@ -106,9 +140,11 @@ function route(req, url, me, body) {
     const name = str(body.name, 80);
     if (name.length < 2) throw new HttpError(400, 'اكتب اسم الموظف (حرفين على الأقل)');
     const last = Math.max(0, ...db.employees.map(e => +((/^EMP-(\d+)$/.exec(e.id) || [])[1]) || 0));
+    const pw = typeof body.password === 'string' ? body.password : '';
+    if (pw.length < MIN_PASS) throw new HttpError(400, `اكتب كلمة سر (${MIN_PASS} أحرف على الأقل)`);
     const emp = { id: 'EMP-' + String(last + 1).padStart(3, '0'), name, dept: str(body.dept, 80) || '—', job: str(body.job, 80) || '—', role: 'employee' };
-    db.employees.push(emp); save();
-    return emp;
+    emp.pass = hashPass(pw); db.employees.push(emp); save();
+    return pub(emp);
   }
 
   /* مسح كل الموظفين المسجلين (مع شيفتاتهم وسجلات حضورهم). نسخة احتياطية مستقلة بتاريخ ووقت
@@ -128,6 +164,21 @@ function route(req, url, me, body) {
     fs.copyFileSync(DB_FILE, DB_FILE + '.bak');
     db.shifts = {}; save();
     return { removed };
+  }
+
+  /* تغيير كلمة سر المستخدم الحالي (لازم كلمة السر الحالية) */
+  if (req.method === 'POST' && p === '/api/me/password') {
+    if (!checkPass(me, String(body.current || ''))) throw new HttpError(400, 'كلمة السر الحالية غير صحيحة');
+    setPass(me, body.next);
+    return { ok: true, _cookie: makeToken(me) };
+  }
+  /* تعيين كلمة سر لموظف (لو نسيها) — متاح لكل المستخدمين زي باقي الإعدادات */
+  const pm = p.match(/^\/api\/settings\/employees\/([^/]+)\/password$/);
+  if (req.method === 'POST' && pm) {
+    const emp = db.employees.find(e => e.id === decodeURIComponent(pm[1]));
+    if (!emp) throw new HttpError(404, 'الموظف غير موجود');
+    setPass(emp, body.password);
+    return emp.id === me.id ? { ok: true, _cookie: makeToken(me) } : { ok: true };
   }
 
   const m = p.match(/^\/api\/shifts\/([^/]+)$/);
@@ -157,47 +208,48 @@ function route(req, url, me, body) {
   throw new HttpError(404, 'غير موجود');
 }
 
-const crypto = require('crypto');
-const sha = v => crypto.createHash('sha256').update(String(v)).digest();
-function authorized(req) {
-  if (!PASSWORD) return true;
-  const h = req.headers.authorization || '';
-  if (!h.startsWith('Basic ')) return false;
-  const given = Buffer.from(h.slice(6), 'base64').toString('utf8');
-  const pass = given.slice(given.indexOf(':') + 1);        // اسم المستخدم يتجاهل، كلمة السر فقط
-  return crypto.timingSafeEqual(sha(pass), sha(PASSWORD));
-}
-
+const CSP = "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self'";
 http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/healthz') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('ok'); }
-    if (!authorized(req)) {
-      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Attendance", charset="UTF-8"', 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('مطلوب تسجيل الدخول');
-    }
     if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
-      res.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'X-Content-Type-Options': 'nosniff',
-        'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; connect-src 'self'"
-      });
-      return res.end(fs.readFileSync(INDEX_FILE));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', 'Content-Security-Policy': CSP });
+      return res.end(fs.readFileSync(sessionUser(req) ? INDEX_FILE : LOGIN_FILE));   // مش مسجل دخول = صفحة تسجيل الدخول
     }
     if (!url.pathname.startsWith('/api/')) throw new HttpError(404, 'غير موجود');
-    if (req.method === 'GET' && url.pathname === '/api/setup') return send(res, 200, { count: db.employees.length });
-    const me = db.employees.find(e => e.id === req.headers['x-user-id']);
-    // لو مفيش أي موظف مسجل، نسمح بإضافة أول موظف من غير هوية (وإلا التطبيق يفضل مقفول)
-    const firstSetup = !db.employees.length && req.method === 'POST' && url.pathname === '/api/settings/employees';
-    if (!me && !firstSetup) throw new HttpError(401, 'المستخدم غير معروف');
     const body = (req.method === 'POST' || req.method === 'PUT') ? await readBody(req) : {};
-    send(res, 200, route(req, url, me, body));
+    const p = url.pathname;
+
+    /* مسارات عامة (من غير تسجيل دخول) */
+    if (req.method === 'GET' && p === '/api/setup') return send(res, 200, { count: db.employees.length });
+    if (req.method === 'POST' && p === '/api/login') {
+      const id = normId(body.id), key = clientIp(req) + '|' + id;
+      throttle(key);
+      const emp = db.employees.find(e => e.id === id);
+      if (!emp || typeof body.password !== 'string' || !checkPass(emp, body.password)) { failed(key); throw new HttpError(401, 'الرقم الوظيفي أو كلمة السر غير صحيحة'); }
+      fails.delete(key);
+      return send(res, 200, pub(emp), { 'Set-Cookie': cookieHdr(req, makeToken(emp)) });
+    }
+    if (req.method === 'POST' && p === '/api/first-setup') {   // إنشاء أول حساب — متاح فقط لما مفيش أي موظف
+      if (db.employees.length) throw new HttpError(403, 'تم الإعداد مسبقًا');
+      const name = typeof body.name === 'string' ? body.name.trim().replace(/\s+/g, ' ').slice(0, 80) : '';
+      if (name.length < 2) throw new HttpError(400, 'اكتب اسم الموظف (حرفين على الأقل)');
+      const emp = { id: 'EMP-001', name, dept: '—', job: '—', role: 'employee' };
+      setPass(emp, body.password); db.employees.push(emp); save();
+      return send(res, 200, pub(emp), { 'Set-Cookie': cookieHdr(req, makeToken(emp)) });
+    }
+    if (req.method === 'POST' && p === '/api/logout') return send(res, 200, { ok: true }, { 'Set-Cookie': cookieHdr(req, '', 0) });
+
+    const me = sessionUser(req);
+    if (!me) throw new HttpError(401, 'انتهت الجلسة — سجّل الدخول من جديد');
+    const out = route(req, url, me, body), extra = {};
+    if (out && out._cookie) { extra['Set-Cookie'] = cookieHdr(req, out._cookie); delete out._cookie; }
+    send(res, 200, out, extra);
   } catch (e) {
     if (e instanceof HttpError) return send(res, e.code, { error: e.message });
     console.error(e); send(res, 500, { error: 'خطأ داخلي في الخادم' });
   }
 }).listen(PORT, HOST, () => {
   console.log(`الحضور والانصراف يعمل على http://${HOST}:${PORT}  (التوقيت: ${TZ})  البيانات: ${DB_FILE}`);
-  if (!PASSWORD && !['127.0.0.1', 'localhost', '::1'].includes(HOST))
-    console.warn('⚠️ تحذير: الخادم متاح على الشبكة بدون ACCESS_PASSWORD — أي شخص معاه الرابط يقدر يعدّل ويمسح كل البيانات.');
 });

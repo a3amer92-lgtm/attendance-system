@@ -116,10 +116,11 @@ function calculateMonthlySummary(id,y,m,today=new Date()){
  return{workDays:work,present:rows.filter(r=>r.in!=null).length,absent:c('غائب'),leave:c('إجازة'),lateDays:lateRows.length,lateTotal:tl,lateAvg:lateRows.length?Math.round(tl/lateRows.length):0,hours:rows.reduce((a,r)=>a+(r.hours||0),0),rows}}
 
 /* ===== API (الخادم هو المرجع: الوقت والصلاحيات) ===== */
-const USER=new URLSearchParams(location.search).get('user')||'EMP-001';
+let USER=null;   // المستخدم الحالي بييجي من الجلسة (تسجيل الدخول)
 async function api(path,opts={}){
- const res=await fetch('/api'+path,{...opts,headers:{'Content-Type':'application/json','X-User-Id':USER}});
+ const res=await fetch('/api'+path,{...opts,headers:{'Content-Type':'application/json'}});
  const j=await res.json().catch(()=>({}));
+ if(res.status===401){location.reload();throw new Error(j.error||'انتهت الجلسة')}
  if(res.status===404&&j.error==='غير موجود'&&opts.method==='DELETE')throw new Error('الخادم شغال بنسخة قديمة — أوقفه (Ctrl+C) وشغّله تاني بالأمر: node server.js');
  if(!res.ok)throw new Error(j.error||'تعذّر الاتصال بالخادم');
  return j}
@@ -131,7 +132,7 @@ async function loadRecords(){
 async function refresh(){try{await loadRecords();render()}catch(e){toast(e.message,'er')}}
 async function init(){
  try{const b=await api('/bootstrap');
-  EmployeeData=b.employees;ShiftData=b.shifts;Holidays=b.holidays;
+  EmployeeData=b.employees;USER=b.employees[0].id;ShiftData=b.shifts;Holidays=b.holidays;
   state.userId=state.viewId=USER;const n=new Date();state.month=`${n.getFullYear()}-${pad(n.getMonth()+1)}`;
   await refresh();
   try{await loadSettings();renderSettings()}catch(e){toast(e.message,'er')}}
@@ -214,12 +215,20 @@ function renderSettings(){
  const box=$('settings');
  box.hidden=false;
  const E=SettingsData.employees,S=SettingsData.shifts;
+ const me=EmployeeData[0];
  box.innerHTML=`<h2>⚙️ الإعدادات</h2>
+ <div class="sub"><h3>👤 حسابي — ${esc(me.name)} (${esc(me.id)})</h3><div class="fl">
+  <div><label class="l" for="pCur">كلمة السر الحالية</label><input id="pCur" type="password" autocomplete="current-password"></div>
+  <div><label class="l" for="pNew">كلمة السر الجديدة (6 أحرف على الأقل)</label><input id="pNew" type="password" autocomplete="new-password"></div>
+  <div><label class="l" for="pNew2">تأكيد كلمة السر الجديدة</label><input id="pNew2" type="password" autocomplete="new-password"></div></div>
+  <div class="act" style="margin:10px 0 0"><button class="pri" id="pSave">🔑 تغيير كلمة السر</button><button id="logout">🚪 تسجيل الخروج</button></div></div>
  <div class="sub"><h3>➕ إضافة موظف</h3>${empForm()}</div>
- <div class="sub"><h3>الشيفت المطبق على كل موظف</h3><div class="tw"><table><thead><tr><th>الموظف</th><th>الرقم الوظيفي</th><th>القسم</th><th>البداية</th><th>النهاية</th><th>أيام العمل</th><th>السماح</th><th></th></tr></thead>
- <tbody>${E.map(e=>{const s=S[e.id];return`<tr><td>${esc(e.name)}</td><td>${esc(e.id)}</td><td>${esc(e.dept)}</td>${s?`<td>${t12(s.start)}</td><td>${t12(s.end)}</td><td>${dayNames(s)}</td><td>${s.grace} د</td>`:'<td colspan="4" class="mut">لا يوجد شيفت</td>'}<td style="white-space:nowrap">${s?`<button class="dan" data-clr="${esc(e.id)}">🗑️ مسح الشيفت</button>`:''}</td></tr>`}).join('')}</tbody></table></div></div>
+ <div class="sub"><h3>الشيفت المطبق على كل موظف</h3><div class="tw"><table><thead><tr><th>الموظف</th><th>الرقم الوظيفي</th><th>القسم</th><th>البداية</th><th>النهاية</th><th>أيام العمل</th><th>السماح</th><th>كلمة السر</th><th></th></tr></thead>
+ <tbody>${E.map(e=>{const s=S[e.id];return`<tr><td>${esc(e.name)}</td><td>${esc(e.id)}</td><td>${esc(e.dept)}</td>${s?`<td>${t12(s.start)}</td><td>${t12(s.end)}</td><td>${dayNames(s)}</td><td>${s.grace} د</td>`:'<td colspan="4" class="mut">لا يوجد شيفت</td>'}<td style="white-space:nowrap"><input type="password" data-pw="${esc(e.id)}" placeholder="جديدة" autocomplete="new-password" style="width:90px"> <button data-setpw="${esc(e.id)}">تعيين</button></td><td style="white-space:nowrap">${s?`<button class="dan" data-clr="${esc(e.id)}">🗑️ مسح الشيفت</button>`:''}</td></tr>`}).join('')}</tbody></table></div></div>
  <div class="sub"><h3>🗑️ مسح البيانات</h3><p class="mut" style="font-size:13px;margin:0 0 10px">إجراءات نهائية على كل الموظفين المسجلين (${E.length} موظف). بيتعمل نسخة احتياطية قبل المسح في data/db.json.bak (آخر نسخة بس).</p>
  <div class="act" style="margin:0"><button class="dan" id="wAtt">🗑️ مسح سجلات الحضور والانصراف لكل الموظفين</button><button class="dan" id="wShift">🗑️ مسح الشيفت المطبق على كل الموظفين</button><button class="dan" id="wEmp">🗑️ مسح كل الموظفين المسجلين</button></div></div>`;
+ $('pSave').onclick=changeMyPassword;$('logout').onclick=logout;
+ box.querySelectorAll('[data-setpw]').forEach(b=>b.onclick=()=>setEmpPassword(b.dataset.setpw));
  $('nAdd').onclick=()=>addEmployee(false);$('wAtt').onclick=wipeAttendance;$('wShift').onclick=wipeAllShifts;$('wEmp').onclick=wipeEmployees;
  box.querySelectorAll('[data-clr]').forEach(b=>b.onclick=()=>clearShift(b.dataset.clr));}
 
@@ -227,18 +236,35 @@ async function wipeAttendance(){
  if(!await ask('هتمسح كل سجلات الحضور والانصراف لكل الموظفين. الإجراء ده نهائي. متأكد؟'))return;
  try{const r=await api('/settings/attendance',{method:'DELETE'});Store.rec={};toast(`تم مسح ${r.removed} سجل حضور`);await refresh()}
  catch(e){toast(e.message,'er')}}
+async function changeMyPassword(){
+ const cur=$('pCur').value,n=$('pNew').value;
+ if(!cur)return toast('اكتب كلمة السر الحالية','er');
+ if(n.length<6)return toast('كلمة السر الجديدة لازم تكون 6 أحرف على الأقل','er');
+ if(n!==$('pNew2').value)return toast('كلمتا السر غير متطابقتين','er');
+ try{await api('/me/password',{method:'POST',body:JSON.stringify({current:cur,next:n})});
+  ['pCur','pNew','pNew2'].forEach(i=>$(i).value='');toast('تم تغيير كلمة السر')}
+ catch(e){toast(e.message,'er')}}
+async function setEmpPassword(id){
+ const inp=document.querySelector(`[data-pw="${CSS.escape(id)}"]`);
+ if(inp.value.length<6){inp.focus();return toast('كلمة السر لازم تكون 6 أحرف على الأقل','er')}
+ try{await api(`/settings/employees/${encodeURIComponent(id)}/password`,{method:'POST',body:JSON.stringify({password:inp.value})});
+  inp.value='';toast('تم تعيين كلمة السر للموظف')}
+ catch(e){toast(e.message,'er')}}
+async function logout(){try{await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch{}location.reload()}
 function empForm(){return`<div class="fl"><div><label class="l" for="nName">اسم الموظف</label><input id="nName" type="text" maxlength="80" autocomplete="off"></div>
  <div><label class="l" for="nDept">القسم (اختياري)</label><input id="nDept" type="text" maxlength="80" autocomplete="off"></div>
- <div><label class="l" for="nJob">الوظيفة (اختياري)</label><input id="nJob" type="text" maxlength="80" autocomplete="off"></div></div>
+ <div><label class="l" for="nJob">الوظيفة (اختياري)</label><input id="nJob" type="text" maxlength="80" autocomplete="off"></div>
+ <div><label class="l" for="nPass">كلمة السر (6 أحرف على الأقل)</label><input id="nPass" type="password" minlength="6" autocomplete="new-password"></div></div>
  <div class="act" style="margin:10px 0 0"><button class="pri" id="nAdd">➕ إضافة موظف</button></div>`}
 function showSetup(title){$('app').innerHTML=`<div class="card"><h2>${title}</h2><p class="mut">مفيش موظفين مسجلين. أضف أول موظف عشان تبدأ:</p>${empForm()}</div>`;$('nAdd').onclick=()=>addEmployee(true)}
 async function addEmployee(setup){
  const name=$('nName').value.trim();
  if(name.length<2){$('nName').focus();return toast('اكتب اسم الموظف (حرفين على الأقل)','er')}
+ if($('nPass').value.length<6){$('nPass').focus();return toast('كلمة السر لازم تكون 6 أحرف على الأقل','er')}
  const btn=$('nAdd');btn.disabled=true;
  try{
-  const r=await api('/settings/employees',{method:'POST',body:JSON.stringify({name,dept:$('nDept').value,job:$('nJob').value})});
-  if(setup){location.search='?user='+encodeURIComponent(r.id);return}
+  const r=await api('/settings/employees',{method:'POST',body:JSON.stringify({name,dept:$('nDept').value,job:$('nJob').value,password:$('nPass').value})});
+  if(setup){location.reload();return}
   toast(`تمت إضافة ${r.name} (${r.id})`);await loadSettings();renderSettings()}
  catch(e){toast(e.message,'er');btn.disabled=false}}
 function askTyped(msg,word){return new Promise(ok=>{ // تأكيد بالكتابة للإجراءات الخطيرة
