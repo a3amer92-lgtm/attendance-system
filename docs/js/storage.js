@@ -8,7 +8,11 @@ var DB = {
   init: async function () {
     var stored = localStorage.getItem(DB.STORAGE_KEY);
     if (stored) {
-      try { DB._data = JSON.parse(stored); return; } catch (e) { /* تالف — نعيد التحميل */ }
+      try {
+        var parsed = JSON.parse(stored);
+        /* لو المخزّن فاضي من الموظفين (زيارة قديمة قبل إضافة الحساب الافتراضي) نرجع للـ seed */
+        if (parsed && Array.isArray(parsed.employees) && parsed.employees.length > 0) { DB._data = parsed; return; }
+      } catch (e) { /* تالف — نعيد التحميل */ }
     }
     try {
       var res = await fetch('data/seed.json');
