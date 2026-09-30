@@ -1,4 +1,5 @@
 node_modules/
+# مجلد docs/ مقصود أنه يُرفع — هو نسخة GitHub Pages الثابتة
 # بيانات حقيقية (موظفين وحضور) — ماتترفعش على جيت هاب
 data/db.json
 data/db.json.bak
