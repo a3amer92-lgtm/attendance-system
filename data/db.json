@@ -1,0 +1,1 @@
+{"employees":[{"id":"EMP-001","name":"احمد","dept":"—","job":"—","role":"employee"}],"shifts":{"EMP-001":{"start":540,"end":900,"grace":15,"days":[0,1,2,3,4]}},"holidays":["2026-07-23","2026-08-25"],"attendance":{}}

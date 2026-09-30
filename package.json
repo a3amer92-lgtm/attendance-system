@@ -1,0 +1,8 @@
+{
+  "name": "attendance-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "شاشة الحضور والانصراف — خادم بدون أي مكتبات خارجية",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
