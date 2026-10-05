@@ -48,15 +48,18 @@ button{border:0;border-radius:9px;padding:10px 18px;cursor:pointer;font-weight:6
 #cf{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px}#cf>div{background:var(--card,#fff);color:var(--tx);border:1px solid var(--bd);border-radius:14px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.35)}#cf p{margin:0 0 16px;line-height:1.7}#cf .act{margin:0;justify-content:flex-start}
 @media print{#cf{display:none!important}@page{size:A4;margin:12mm 12mm 16mm;@bottom-center{content:"صفحة " counter(page) " من " counter(pages);font:9px Cairo,sans-serif;color:#667085}}
 #app,#toast{display:none!important}#printArea{display:block}body{background:#fff}}
+
+#app.on-settings>:not(#settings):not(.bar){display:none}#app:not(.on-settings)>#settings{display:none}
 </style></head><body>
 <div id="app">
+ <div class="bar" style="justify-content:flex-end"><button class="sec" id="btnSettings" aria-expanded="false" onclick="toggleSettings()">⚙️ الإعدادات</button></div>
  <div class="grid2"><section class="card big" id="today"></section><section class="card" id="shift"></section></div>
- <section>
+ <section class="card"><h2>📋 سجل الحضور والانصراف</h2><div class="tw"><table><thead><tr><th>اليوم</th><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>ساعات العمل</th><th>التأخير</th></tr></thead><tbody id="tbody"></tbody></table></div></section>
+<section>
   <div class="sh"><h2>📊 ملخص الشهر — <span id="mLabel"></span></h2><div style="display:flex;gap:8px"><input type="month" id="mSum" style="width:auto"><button class="pri" id="btnPdf">📄 تصدير تقرير PDF</button></div></div>
   <div class="stats" id="stats"></div>
  </section>
-<section class="card"><h2>📋 سجل الحضور والانصراف</h2><div class="tw"><table><thead><tr><th>اليوم</th><th>التاريخ</th><th>حضور</th><th>انصراف</th><th>ساعات العمل</th><th>التأخير</th></tr></thead><tbody id="tbody"></tbody></table></div></section>
-<section class="card set" id="settings" hidden></section>
+<section class="card set" id="settings"></section>
 </div>
 <div id="printArea"></div><div id="toast"></div>
 <script>
@@ -175,7 +178,7 @@ async function checkOut(){
  if(!canAct())return toast('لا يمكنك تسجيل انصراف موظف آخر','er');
  try{await api('/attendance/check-out',{method:'POST'});toast('تم تسجيل الانصراف بنجاح');await refresh()}catch(e){toast(e.message,'er')}}
 function renderShift(){const id=state.viewId,s=ShiftData[id],b=s||{start:480,end:960,grace:15};
- $('shift').innerHTML=`<h2>⏱️ شيفت الموظف</h2>${s?`<div class="kv"><div><small>بداية الشيفت</small><b>${t12(s.start)}</b></div><div><small>نهاية الشيفت</small><b>${t12(s.end)}</b></div><div><small>مدة العمل</small><b>${dur(s.end-s.start)}</b></div><div><small>فترة السماح</small><b>${s.grace} دقائق</b></div></div>
+ $('shift').innerHTML=`<h2>⏱️ شيفت الموظف</h2>${s?`<div class="kv"><div><small>بداية الشيفت</small><b>${t12(s.start)}</b></div><div><small>نهاية الشيفت</small><b>${t12(s.end)}</b></div><div><small>مدة العمل</small><b>${dur(s.end-s.start)}</b></div><div><small>فترة السماح</small><b>${s.grace} دقائق</b></div><div><small>أيام العمل</small><b>${dayNames(s)}</b></div></div>
  <p class="mut" style="margin-top:8px;font-size:12px">آخر وقت بدون تأخير: ${t12(s.start+s.grace)}</p>`:'<p class="mut" style="margin:8px 0">لا يوجد شيفت مطبق على هذا الموظف — لن يُحسب تأخير. يمكنك تحديد شيفت من هنا أو من الإعدادات.</p>'}
  <div class="act"><button class="sec" id="bEdit">${s?'✏️ تعديل الشيفت':'➕ تحديد شيفت'}</button></div><div class="edit" id="editBox"><div><label class="mut">البداية</label><input type="time" id="eS" value="${t24(b.start)}"></div><div><label class="mut">النهاية</label><input type="time" id="eE" value="${t24(b.end)}"></div><div><label class="mut">السماح (د)</label><input type="number" id="eG" value="${b.grace}"></div><button class="pri" id="bSave" style="grid-column:1/-1">حفظ</button></div>`;
  $('bEdit').onclick=()=>$('editBox').classList.toggle('on');
@@ -196,12 +199,12 @@ setInterval(tick,1000);
 function renderSummary(){
  const[y,m]=state.month.split('-').map(Number),s=calculateMonthlySummary(state.viewId,y,m-1);
  $('mLabel').textContent=`${MONTHS[m-1]} ${y}`;$('mSum').value=state.month;
- const it=[['📆','إجمالي أيام العمل',s.workDays+' يوم'],['✅','أيام الحضور',s.present+' يوم'],['❌','أيام الغياب',s.absent+' يوم'],['🌴','أيام الإجازة',s.leave+' يوم'],['⏰','أيام التأخير',s.lateDays+' أيام'],['⌛','إجمالي دقائق التأخير',s.lateTotal+' دقيقة'],['📉','متوسط التأخير',s.lateAvg+' دقيقة'],['🕓','إجمالي ساعات العمل',dur(s.hours)]];
+ const it=[['✅','أيام الحضور',s.present+' يوم'],['❌','أيام الغياب',s.absent+' يوم'],['⏰','أيام التأخير',s.lateDays+' يوم'],['🌴','أيام الإجازة',s.leave+' يوم']];
  $('stats').innerHTML=it.map(a=>`<div class="stat"><small>${a[0]} ${a[1]}</small><b>${a[2]}</b></div>`).join('')}
 function renderTable(){
  const[y,m]=state.month.split('-').map(Number),f=state.f;
- let rows=buildRows(state.viewId,y,m-1).filter(r=>(!f.from||r.k>=f.from)&&(!f.to||r.k<=f.to)&&(!f.status||r.status===f.status)).reverse();
- $('tbody').innerHTML=rows.length?rows.map(r=>`<tr><td>${r.day}</td><td>${pad(r.date.getDate())}/${pad(m)}/${y}</td><td>${t12(r.in)}</td><td>${r.in!=null&&r.out==null?'<span class="mut">لم يُسجل</span>':t12(r.out)}</td><td>${hm(r.hours)}</td><td>${r.late==null?'—':lateBadge(r.late)}</td></tr>`).join(''):'<tr><td colspan="6" class="mut" style="text-align:center">لا توجد سجلات مطابقة</td></tr>'}
+ let rows=buildRows(state.viewId,y,m-1).filter(r=>r.in!=null&&(!f.from||r.k>=f.from)&&(!f.to||r.k<=f.to)&&(!f.status||r.status===f.status));
+ $('tbody').innerHTML=rows.length?rows.map(r=>`<tr><td>${r.day}</td><td>${pad(r.date.getDate())}/${pad(m)}/${y}</td><td>${t12(r.in)}</td><td>${r.in!=null&&r.out==null?'<span class="mut">لم يُسجل</span>':t12(r.out)}</td><td>${hm(r.hours)}</td><td>${r.late==null?'—':lateBadge(r.late)}</td></tr>`).join(''):'<tr><td colspan="6" class="mut" style="text-align:center">لا توجد سجلات حضور</td></tr>'}
 function render(){renderToday();renderShift();renderSummary();renderTable()}
 
 /* ===== ⚙️ الإعدادات — شيفت كل موظف + مسح البيانات (متاحة لكل المستخدمين) ===== */
@@ -211,9 +214,35 @@ let SettingsData={employees:[],shifts:{}};
 const dayNames=s=>WEEK_ORDER.filter(d=>daysOf(s).includes(d)).map(d=>DAYS[d]).join('، ');
 async function loadSettings(){
  SettingsData=await api('/settings/shifts');}
+function applyView(){
+ const on=location.hash==='#/settings',a=$('app'),t=$('btnSettings');
+ if(!a)return;
+ a.classList.toggle('on-settings',on);
+ if(t){t.textContent=on?'🏠 الرئيسية':'⚙️ الإعدادات';t.setAttribute('aria-expanded',String(on))}
+ if(on)window.scrollTo(0,0)}
+function toggleSettings(){location.hash=location.hash==='#/settings'?'#/':'#/settings'}
+window.addEventListener('hashchange',applyView);applyView();
+let shiftSel=null;
+function shiftEditorHTML(E,S){
+ if(!E.length)return'';
+ if(!shiftSel||!E.some(e=>e.id===shiftSel))shiftSel=E[0].id;
+ const s=S[shiftSel]||{start:480,end:960,grace:15,days:DEF_DAYS},days=daysOf(s);
+ return`<div class="sub"><h3>⏱️ شيفت وأيام عمل الموظف</h3><div class="fl">
+ <div><label class="l" for="sEmp">الموظف</label><select id="sEmp">${E.map(e=>`<option value="${esc(e.id)}"${e.id===shiftSel?' selected':''}>${esc(e.name)} (${esc(e.id)})</option>`).join('')}</select></div>
+ <div><label class="l" for="sS">بداية الشيفت</label><input id="sS" type="time" value="${t24(s.start)}"></div>
+ <div><label class="l" for="sE">نهاية الشيفت</label><input id="sE" type="time" value="${t24(s.end)}"></div>
+ <div><label class="l" for="sG">السماح (دقائق)</label><input id="sG" type="number" min="0" max="120" value="${s.grace}"></div></div>
+ <label class="l">أيام العمل</label><div class="days" id="sDays">${WEEK_ORDER.map(d=>`<label><input type="checkbox" value="${d}"${days.includes(d)?' checked':''}>${DAYS[d]}</label>`).join('')}</div>
+ <div class="act" style="margin:10px 0 0"><button class="pri" id="sSave">💾 حفظ الشيفت</button></div></div>`}
+async function saveShiftFromSettings(){
+ const id=$('sEmp').value,days=[...$('sDays').querySelectorAll('input:checked')].map(i=>+i.value);
+ if(!days.length)return toast('اختر يوم عمل واحد على الأقل','er');
+ const res=await updateShift(id,{start:tm($('sS').value||'0:0'),end:tm($('sE').value||'0:0'),grace:+$('sG').value,days});
+ if(!res.ok)return toast(res.msg,'er');
+ shiftSel=id;toast('تم حفظ الشيفت وأيام العمل');
+ await loadSettings();render();renderSettings()}
 function renderSettings(){
  const box=$('settings');
- box.hidden=false;
  const E=SettingsData.employees,S=SettingsData.shifts;
  const me=EmployeeData[0];
  box.innerHTML=`<h2>⚙️ الإعدادات</h2>
@@ -223,11 +252,13 @@ function renderSettings(){
   <div><label class="l" for="pNew2">تأكيد كلمة السر الجديدة</label><input id="pNew2" type="password" autocomplete="new-password"></div></div>
   <div class="act" style="margin:10px 0 0"><button class="pri" id="pSave">🔑 تغيير كلمة السر</button><button id="logout">🚪 تسجيل الخروج</button></div></div>
  <div class="sub"><h3>➕ إضافة موظف</h3>${empForm()}</div>
+ ${shiftEditorHTML(E,S)}
  <div class="sub"><h3>الشيفت المطبق على كل موظف</h3><div class="tw"><table><thead><tr><th>الموظف</th><th>الرقم الوظيفي</th><th>القسم</th><th>البداية</th><th>النهاية</th><th>أيام العمل</th><th>السماح</th><th>كلمة السر</th><th></th></tr></thead>
  <tbody>${E.map(e=>{const s=S[e.id];return`<tr><td>${esc(e.name)}</td><td>${esc(e.id)}</td><td>${esc(e.dept)}</td>${s?`<td>${t12(s.start)}</td><td>${t12(s.end)}</td><td>${dayNames(s)}</td><td>${s.grace} د</td>`:'<td colspan="4" class="mut">لا يوجد شيفت</td>'}<td style="white-space:nowrap"><input type="password" data-pw="${esc(e.id)}" placeholder="جديدة" autocomplete="new-password" style="width:90px"> <button data-setpw="${esc(e.id)}">تعيين</button></td><td style="white-space:nowrap">${s?`<button class="dan" data-clr="${esc(e.id)}">🗑️ مسح الشيفت</button>`:''}</td></tr>`}).join('')}</tbody></table></div></div>
  <div class="sub"><h3>🗑️ مسح البيانات</h3><p class="mut" style="font-size:13px;margin:0 0 10px">إجراءات نهائية على كل الموظفين المسجلين (${E.length} موظف). بيتعمل نسخة احتياطية قبل المسح في data/db.json.bak (آخر نسخة بس).</p>
  <div class="act" style="margin:0"><button class="dan" id="wAtt">🗑️ مسح سجلات الحضور والانصراف لكل الموظفين</button><button class="dan" id="wShift">🗑️ مسح الشيفت المطبق على كل الموظفين</button><button class="dan" id="wEmp">🗑️ مسح كل الموظفين المسجلين</button></div></div>`;
  $('pSave').onclick=changeMyPassword;$('logout').onclick=logout;
+ if($('sEmp')){$('sEmp').onchange=function(){shiftSel=this.value;renderSettings()};$('sSave').onclick=saveShiftFromSettings}
  box.querySelectorAll('[data-setpw]').forEach(b=>b.onclick=()=>setEmpPassword(b.dataset.setpw));
  $('nAdd').onclick=()=>addEmployee(false);$('wAtt').onclick=wipeAttendance;$('wShift').onclick=wipeAllShifts;$('wEmp').onclick=wipeEmployees;
  box.querySelectorAll('[data-clr]').forEach(b=>b.onclick=()=>clearShift(b.dataset.clr));}
